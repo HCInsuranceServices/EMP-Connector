@@ -27,6 +27,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.regex.Pattern;
 
 /**
  * @author hal.hildebrand
@@ -35,6 +36,8 @@ import java.util.function.Function;
 public class EmpConnector {
     private static final String ERROR = "error";
     private static final String FAILURE = "failure";
+
+    private static final Pattern WRONG_REPLAY_ID_ERROR_REGEX = Pattern.compile("400::The replayId.*you provided was invalid\\..*");
 
     private class SubscriptionImpl implements TopicSubscription {
         private final String topic;
@@ -86,6 +89,22 @@ public class EmpConnector {
             long replayFrom = getReplayFrom();
             ClientSessionChannel channel = client.getChannel(topic);
             CompletableFuture<TopicSubscription> future = new CompletableFuture<>();
+            future.handle((topicSubscription, throwable) -> {
+                if (throwable instanceof CannotSubscribe &&
+                        WRONG_REPLAY_ID_ERROR_REGEX.matcher(((CannotSubscribe) throwable).getErrror().toString()).matches()) {
+                    log.info("Wrong replay id error while subscribing to {}. Trying again with replay id {}",
+                            topic, REPLAY_FROM_TIP);
+                    if (replayFrom == REPLAY_FROM_TIP) {
+                        log.info("Last try of subscription to {} was already with replay id {}. Aborting next try.",
+                                topic, REPLAY_FROM_TIP);
+                        return topicSubscription;
+                    }
+                    replay.put(topic, REPLAY_FROM_TIP);
+                    return subscribe();
+                }
+                return topicSubscription;
+            });
+
             channel.subscribe((c, message) -> consumer.accept(message.getDataAsMap()), (message) -> {
                 if (message.isSuccessful()) {
                     future.complete(this);
