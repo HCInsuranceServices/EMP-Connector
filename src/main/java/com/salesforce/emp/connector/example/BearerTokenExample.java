@@ -59,7 +59,7 @@ public class BearerTokenExample {
 
         connector.start().get(5, TimeUnit.SECONDS);
 
-        TopicSubscription subscription = connector.subscribe(argv[2], replayFrom, consumer).get(5, TimeUnit.SECONDS);
+        TopicSubscription subscription = connector.subscribe(argv[2], replayFrom, consumer);
 
         System.out.println(String.format("Subscribed: %s", subscription));
     }

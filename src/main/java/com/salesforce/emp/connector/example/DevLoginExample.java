@@ -10,16 +10,18 @@ import com.salesforce.emp.connector.BayeuxParameters;
 import com.salesforce.emp.connector.EmpConnector;
 import com.salesforce.emp.connector.LoginHelper;
 import com.salesforce.emp.connector.TopicSubscription;
+import org.eclipse.jetty.util.ajax.JSON;
 
 import java.net.URL;
 import java.util.Map;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
-import org.eclipse.jetty.util.ajax.JSON;
 
-import static org.cometd.bayeux.Channel.*;
+import static org.cometd.bayeux.Channel.META_CONNECT;
+import static org.cometd.bayeux.Channel.META_DISCONNECT;
+import static org.cometd.bayeux.Channel.META_HANDSHAKE;
+import static org.cometd.bayeux.Channel.META_SUBSCRIBE;
+import static org.cometd.bayeux.Channel.META_UNSUBSCRIBE;
 
 /**
  * An example of using the EMP connector
@@ -64,18 +66,7 @@ public class DevLoginExample {
             replayFrom = Long.parseLong(argv[4]);
         }
         TopicSubscription subscription;
-        try {
-            subscription = connector.subscribe(argv[3], replayFrom, consumer).get(5, TimeUnit.SECONDS);
-        } catch (ExecutionException e) {
-            System.err.println(e.getCause().toString());
-            System.exit(1);
-            throw e.getCause();
-        } catch (TimeoutException e) {
-            System.err.println("Timed out subscribing");
-            System.exit(1);
-            throw e.getCause();
-        }
-
+        subscription = connector.subscribe(argv[3], replayFrom, consumer);
         System.out.println(String.format("Subscribed: %s", subscription));
     }
 }

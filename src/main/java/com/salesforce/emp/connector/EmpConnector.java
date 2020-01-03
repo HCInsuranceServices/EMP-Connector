@@ -24,6 +24,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -85,25 +86,10 @@ public class EmpConnector {
             return String.format("Subscription [%s:%s]", getTopic(), getReplayFrom());
         }
 
-        Future<TopicSubscription> subscribe() {
+        TopicSubscription subscribe() {
             long replayFrom = getReplayFrom();
             ClientSessionChannel channel = client.getChannel(topic);
             CompletableFuture<TopicSubscription> future = new CompletableFuture<>();
-            future.handle((topicSubscription, throwable) -> {
-                if (throwable instanceof CannotSubscribe &&
-                        WRONG_REPLAY_ID_ERROR_REGEX.matcher(((CannotSubscribe) throwable).getErrror().toString()).matches()) {
-                    log.info("Wrong replay id error while subscribing to {}. Trying again with replay id {}",
-                            topic, REPLAY_FROM_TIP);
-                    if (replayFrom == REPLAY_FROM_TIP) {
-                        log.info("Last try of subscription to {} was already with replay id {}. Aborting next try.",
-                                topic, REPLAY_FROM_TIP);
-                        return topicSubscription;
-                    }
-                    replay.put(topic, REPLAY_FROM_TIP);
-                    return subscribe();
-                }
-                return topicSubscription;
-            });
 
             channel.subscribe((c, message) -> consumer.accept(message.getDataAsMap()), (message) -> {
                 if (message.isSuccessful()) {
@@ -117,7 +103,24 @@ public class EmpConnector {
                             new CannotSubscribe(parameters.endpoint(), topic, replayFrom, error != null ? error : message));
                 }
             });
-            return future;
+
+            try {
+                return future.get(10, TimeUnit.SECONDS);
+            } catch (Exception e) {
+                if (e.getCause() instanceof CannotSubscribe &&
+                        WRONG_REPLAY_ID_ERROR_REGEX.matcher(((CannotSubscribe) e.getCause()).getErrror().toString()).matches()) {
+                    log.info("Wrong replay id error while subscribing to {}. Trying again with replay id {}",
+                            topic, REPLAY_FROM_TIP);
+                    if (replayFrom == REPLAY_FROM_TIP) {
+                        log.info("Last try of subscription to {} was already with replay id {}. Aborting next try.",
+                                topic, REPLAY_FROM_TIP);
+                        throw new RuntimeException(e.getCause());
+                    }
+                    replay.put(topic, REPLAY_FROM_TIP);
+                    return subscribe();
+                }
+                throw new RuntimeException(e);
+            }
         }
     }
 
@@ -213,7 +216,7 @@ public class EmpConnector {
      * @return a Future returning the Subscription - on completion returns a Subscription or throws a CannotSubscribe
      *         exception
      */
-    public Future<TopicSubscription> subscribe(String topic, long replayFrom, Consumer<Map<String, Object>> consumer) {
+    public TopicSubscription subscribe(String topic, long replayFrom, Consumer<Map<String, Object>> consumer) {
         if (!running.get()) {
             throw new IllegalStateException(String.format("Connector[%s} has not been started",
                     parameters.endpoint()));
@@ -254,7 +257,7 @@ public class EmpConnector {
      * @return a Future returning the Subscription - on completion returns a Subscription or throws a CannotSubscribe
      *         exception
      */
-    public Future<TopicSubscription> subscribeEarliest(String topic, Consumer<Map<String, Object>> consumer) {
+    public TopicSubscription subscribeEarliest(String topic, Consumer<Map<String, Object>> consumer) {
         return subscribe(topic, REPLAY_FROM_EARLIEST, consumer);
     }
 
@@ -268,7 +271,7 @@ public class EmpConnector {
      * @return a Future returning the Subscription - on completion returns a Subscription or throws a CannotSubscribe
      *         exception
      */
-    public Future<TopicSubscription> subscribeTip(String topic, Consumer<Map<String, Object>> consumer) {
+    public TopicSubscription subscribeTip(String topic, Consumer<Map<String, Object>> consumer) {
         return subscribe(topic, REPLAY_FROM_TIP, consumer);
     }
 
