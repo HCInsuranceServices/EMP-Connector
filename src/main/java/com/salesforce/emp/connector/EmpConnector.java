@@ -91,17 +91,19 @@ public class EmpConnector {
             ClientSessionChannel channel = client.getChannel(topic);
             CompletableFuture<TopicSubscription> future = new CompletableFuture<>();
 
-            channel.subscribe((c, message) -> consumer.accept(message.getDataAsMap()), (message) -> {
-                if (message.isSuccessful()) {
-                    future.complete(this);
-                } else {
-                    Object error = message.get(ERROR);
-                    if (error == null) {
-                        error = message.get(FAILURE);
+            CompletableFuture.runAsync(() -> {
+                channel.subscribe((c, message) -> consumer.accept(message.getDataAsMap()), (message) -> {
+                    if (message.isSuccessful()) {
+                        future.complete(this);
+                    } else {
+                        Object error = message.get(ERROR);
+                        if (error == null) {
+                            error = message.get(FAILURE);
+                        }
+                        future.completeExceptionally(
+                                new CannotSubscribe(parameters.endpoint(), topic, replayFrom, error != null ? error : message));
                     }
-                    future.completeExceptionally(
-                            new CannotSubscribe(parameters.endpoint(), topic, replayFrom, error != null ? error : message));
-                }
+                });
             });
 
             try {
