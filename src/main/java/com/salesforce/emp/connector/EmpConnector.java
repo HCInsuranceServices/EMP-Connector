@@ -87,42 +87,47 @@ public class EmpConnector {
         }
 
         TopicSubscription subscribe() {
+            CompletableFuture<TopicSubscription> future = new CompletableFuture<>();
+            subscribe(future);
+            CompletableFuture.runAsync(() -> {
+                try {
+                    future.get(10, TimeUnit.SECONDS);
+                } catch (Exception e) {
+                    log.error("Error while waiting for subscribe future to finish", e);
+                }
+            });
+            return this;
+        }
+
+        private void subscribe(CompletableFuture<TopicSubscription> future) {
             long replayFrom = getReplayFrom();
             ClientSessionChannel channel = client.getChannel(topic);
-            CompletableFuture<TopicSubscription> future = new CompletableFuture<>();
 
-            CompletableFuture.runAsync(() -> {
-                channel.subscribe((c, message) -> consumer.accept(message.getDataAsMap()), (message) -> {
-                    if (message.isSuccessful()) {
-                        future.complete(this);
-                    } else {
-                        Object error = message.get(ERROR);
-                        if (error == null) {
-                            error = message.get(FAILURE);
+            channel.subscribe((c, message) -> consumer.accept(message.getDataAsMap()), (message) -> {
+                if (message.isSuccessful()) {
+                    future.complete(this);
+                } else {
+                    Object error = message.get(ERROR);
+                    if (error == null) {
+                        error = message.get(FAILURE);
+                    }
+
+                    if (error != null && WRONG_REPLAY_ID_ERROR_REGEX.matcher(error.toString()).matches()) {
+                        log.info("Wrong replay id error while subscribing to {}. Trying again with replay id {}",
+                                topic, REPLAY_FROM_TIP);
+                        if (replayFrom == REPLAY_FROM_TIP) {
+                            log.error("Last try of subscription to {} was already with replay id {}. Aborting next try.", topic, REPLAY_FROM_TIP);
+                            future.completeExceptionally(new CannotSubscribe(parameters.endpoint(), topic, replayFrom, error));
+                            return;
                         }
+                        replay.put(topic, REPLAY_FROM_TIP);
+                        subscribe(future);
+                    } else {
                         future.completeExceptionally(
                                 new CannotSubscribe(parameters.endpoint(), topic, replayFrom, error != null ? error : message));
                     }
-                });
-            });
-
-            try {
-                return future.get(10, TimeUnit.SECONDS);
-            } catch (Exception e) {
-                if (e.getCause() instanceof CannotSubscribe &&
-                        WRONG_REPLAY_ID_ERROR_REGEX.matcher(((CannotSubscribe) e.getCause()).getErrror().toString()).matches()) {
-                    log.info("Wrong replay id error while subscribing to {}. Trying again with replay id {}",
-                            topic, REPLAY_FROM_TIP);
-                    if (replayFrom == REPLAY_FROM_TIP) {
-                        log.info("Last try of subscription to {} was already with replay id {}. Aborting next try.",
-                                topic, REPLAY_FROM_TIP);
-                        throw new RuntimeException(e.getCause());
-                    }
-                    replay.put(topic, REPLAY_FROM_TIP);
-                    return subscribe();
                 }
-                throw new RuntimeException(e);
-            }
+            });
         }
     }
 
