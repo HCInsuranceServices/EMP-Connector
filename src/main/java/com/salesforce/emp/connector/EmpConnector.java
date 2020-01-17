@@ -116,9 +116,9 @@ public class EmpConnector {
                         log.info("Wrong replay id error while subscribing to {}. Trying again with replay id {}",
                                 topic, REPLAY_FROM_TIP);
                         if (replayFrom == REPLAY_FROM_TIP) {
-                            log.info("Last try of subscription to {} was already with replay id {}. Aborting next try.",
-                                    topic, REPLAY_FROM_TIP);
-                            throw new RuntimeException(error.toString());
+                            log.error("Last try of subscription to {} was already with replay id {}. Aborting next try.", topic, REPLAY_FROM_TIP);
+                            future.completeExceptionally(new CannotSubscribe(parameters.endpoint(), topic, replayFrom, error));
+                            return;
                         }
                         replay.put(topic, REPLAY_FROM_TIP);
                         subscribe(future);
